@@ -5,8 +5,10 @@ import pandas as pd
 import streamlit as st
 
 from shared.db import get_jobs_df, init_db, update_job_status
+from shared.job_dates import parse_date_posted
 
 STATUS_OPTIONS = ["New", "Applied", "Saved", "Ignored"]
+SOURCE_OPTIONS = ["CryptocurrencyJobs", "Web3.career", "CryptoJobsList", "crypto.jobs", "eJobs.ro"]
 AGE_WINDOWS = {
     "Any time": None,
     "Last 24 hours": timedelta(days=1),
@@ -14,7 +16,7 @@ AGE_WINDOWS = {
     "Last 7 days": timedelta(days=7),
     "Last 30 days": timedelta(days=30),
 }
-SORT_OPTIONS = ["Newest discovered", "Recently refreshed", "Compensation first"]
+SORT_OPTIONS = ["Newest posted", "Recently refreshed", "Compensation first"]
 
 
 def parse_tags(value):
@@ -60,11 +62,14 @@ def load_jobs():
     jobs_df["tags"] = jobs_df.get("tags", "").fillna("")
 
     now = datetime.now()
-    age_delta = now - jobs_df["created_at"]
+    jobs_df["posted_at"] = jobs_df["date_posted"].apply(parse_date_posted)
+    jobs_df["effective_posted_at"] = jobs_df["posted_at"].fillna(jobs_df["created_at"])
+    age_delta = now - jobs_df["effective_posted_at"]
     jobs_df["is_new"] = age_delta < timedelta(days=1)
     jobs_df["new_badge"] = jobs_df["is_new"].map(lambda value: "New" if value else "")
     jobs_df["created_label"] = jobs_df["created_at"].apply(format_relative_time)
     jobs_df["last_seen_label"] = jobs_df["last_seen_at"].apply(format_relative_time)
+    jobs_df["posted_label"] = jobs_df["effective_posted_at"].apply(format_relative_time)
     jobs_df["tags_list"] = jobs_df["tags"].apply(parse_tags)
     jobs_df["tags_label"] = jobs_df["tags_list"].apply(lambda tags: ", ".join(tags))
     jobs_df["remote_flag"] = jobs_df["location"].str.contains("Remote|Anywhere|Distributed", case=False, na=False)
@@ -111,13 +116,13 @@ def apply_filters(
 
     age_limit = AGE_WINDOWS[max_age_label]
     if age_limit is not None:
-        filtered = filtered[filtered["created_at"] >= (datetime.now() - age_limit)]
+        filtered = filtered[filtered["effective_posted_at"] >= (datetime.now() - age_limit)]
 
     if sort_mode == "Recently refreshed":
         return filtered.sort_values(by=["last_seen_at", "created_at"], ascending=[False, False])
     if sort_mode == "Compensation first":
-        return filtered.sort_values(by=["compensation_flag", "is_new", "created_at"], ascending=[False, False, False])
-    return filtered.sort_values(by=["is_new", "created_at"], ascending=[False, False])
+        return filtered.sort_values(by=["compensation_flag", "is_new", "effective_posted_at"], ascending=[False, False, False])
+    return filtered.sort_values(by=["effective_posted_at", "created_at"], ascending=[False, False])
 
 
 def render_metric_strip(jobs_df):
@@ -128,11 +133,12 @@ def render_metric_strip(jobs_df):
     applied_jobs = int((jobs_df["status"] == "Applied").sum())
     latest_seen = jobs_df["last_seen_at"].max()
     latest_label = format_relative_time(latest_seen) if pd.notna(latest_seen) else "Unknown"
+    recent_jobs = int((jobs_df["effective_posted_at"] >= (datetime.now() - timedelta(days=7))).sum())
 
     metric_cards = [
         ("Tracked roles", total_jobs),
         ("New in 24h", new_jobs),
-        ("Remote", remote_jobs),
+        ("Recent 7d", recent_jobs),
         ("Saved", saved_jobs),
         ("Applied", applied_jobs),
         ("Latest refresh", latest_label),
@@ -225,6 +231,7 @@ def render_card(job):
     employment_type = escape(str(job["employment_type"] or "Type unknown"))
     compensation = escape(str(job["compensation"] or "Comp not listed"))
     posted = escape(str(job["date_posted"]))
+    posted_label = escape(str(job["posted_label"]))
     created_label = escape(str(job["created_label"]))
     last_seen_label = escape(str(job["last_seen_label"]))
     apply_link = escape(str(job["apply_link"]), quote=True)
@@ -253,7 +260,7 @@ def render_card(job):
                 <div><span>Posted</span><strong>{posted}</strong></div>
             </div>
             <div class="job-card__footer">
-                <span>First seen {created_label} • refreshed {last_seen_label}</span>
+                <span>Posted {posted_label} • first seen {created_label} • refreshed {last_seen_label}</span>
                 <a href="{apply_link}" target="_blank">Open posting</a>
             </div>
         </div>
@@ -298,7 +305,7 @@ def render_insights(jobs_df):
     left_col, right_col = st.columns(2)
 
     with left_col:
-        source_counts = jobs_df["source_site"].value_counts().rename_axis("Source").reset_index(name="Jobs")
+        source_counts = jobs_df["source_site"].value_counts().reindex(SOURCE_OPTIONS, fill_value=0).rename_axis("Source").reset_index(name="Jobs")
         st.caption("Source coverage")
         st.bar_chart(source_counts.set_index("Source"))
 
@@ -516,11 +523,10 @@ else:
         st.header("Filters")
         search_term = st.text_input("Search roles, companies, places, or tags")
         selected_statuses = st.multiselect("Status", STATUS_OPTIONS, default=STATUS_OPTIONS)
-        source_options = sorted(df["source_site"].dropna().unique().tolist())
-        selected_sources = st.multiselect("Source", source_options, default=source_options)
+        selected_sources = st.multiselect("Source", SOURCE_OPTIONS, default=[source for source in SOURCE_OPTIONS if source in df["source_site"].unique()])
         tag_options = sorted({tag for tags in df["tags_list"] for tag in tags})
         selected_tags = st.multiselect("Tags", tag_options)
-        max_age_label = st.selectbox("Recency", list(AGE_WINDOWS.keys()), index=0)
+        max_age_label = st.selectbox("Recency", list(AGE_WINDOWS.keys()), index=2)
         sort_mode = st.selectbox("Sort", SORT_OPTIONS, index=0)
         remote_only = st.toggle("Remote only", value=False)
         compensation_only = st.toggle("Only jobs with pay info", value=False)

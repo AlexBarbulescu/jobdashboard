@@ -181,3 +181,21 @@ def update_job_status(job_id, new_status):
     cursor.execute("UPDATE jobs SET status = ? WHERE id = ?", (new_status, job_id))
     conn.commit()
     conn.close()
+
+
+def sync_source_jobs(source_site, active_job_ids):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    active_ids = [str(job_id) for job_id in active_job_ids if job_id]
+
+    if active_ids:
+        placeholders = ", ".join(["?"] * len(active_ids))
+        cursor.execute(
+            f"DELETE FROM jobs WHERE source_site = ? AND id NOT IN ({placeholders})",
+            [source_site, *active_ids],
+        )
+    else:
+        cursor.execute("DELETE FROM jobs WHERE source_site = ?", (source_site,))
+
+    conn.commit()
+    conn.close()

@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 import xml.etree.ElementTree as ET
 from urllib.parse import urljoin
@@ -6,7 +7,8 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from shared.db import insert_job
+from shared.db import insert_job, sync_source_jobs
+from shared.job_dates import is_recent_post
 
 KEYWORDS = [
     "UI/UX",
@@ -36,6 +38,7 @@ EJOBS_BASE_URL = "https://www.ejobs.ro"
 EJOBS_REMOTE_DESIGN_URL = f"{EJOBS_BASE_URL}/locuri-de-munca/remote/design"
 CRYPTOJOBSLIST_DESIGNER_RSS_URL = "https://api.cryptojobslist.com/rss/Designer.xml"
 CRYPTOJOBS_DESIGN_URL = "https://crypto.jobs/blockchain-design-jobs"
+MAX_JOB_AGE_DAYS = int(os.environ.get("MAX_JOB_AGE_DAYS", "30"))
 
 
 def normalize_text(value):
@@ -238,7 +241,7 @@ def parse_ejobs_listing(card):
         "job_id": stable_job_id("ejobs", apply_link),
         "title": title,
         "company": company,
-        "source_site": "eJobs",
+        "source_site": "eJobs.ro",
         "date_posted": date_posted,
         "apply_link": apply_link,
         "location": location,
@@ -351,7 +354,8 @@ def should_keep_job(job_data):
     searchable = job_data["search_blob"]
     remote_match = is_match(searchable, LOCATIONS)
     industry_match = job_data["source_site"] in {"CryptocurrencyJobs", "Web3.career", "CryptoJobsList", "crypto.jobs"} or is_match(searchable, INDUSTRIES)
-    return remote_match and industry_match
+    recent_match = is_recent_post(job_data.get("date_posted"), MAX_JOB_AGE_DAYS)
+    return remote_match and industry_match and recent_match
 
 
 def save_job(job_data):
@@ -377,12 +381,15 @@ def scrape_cryptocurrencyjobs():
         soup = BeautifulSoup(response.text, "html.parser")
 
         count = 0
+        active_job_ids = []
         for job in soup.select("li.job-list-item"):
             parsed = parse_cryptocurrencyjobs_listing(job)
             if not parsed or not should_keep_job(parsed):
                 continue
+            active_job_ids.append(parsed["job_id"])
             if save_job(parsed):
                 count += 1
+        sync_source_jobs("CryptocurrencyJobs", active_job_ids)
         return count
     except Exception as exc:
         print(f"Error scraping CryptocurrencyJobs: {exc}")
@@ -397,12 +404,15 @@ def scrape_web3career():
         soup = BeautifulSoup(response.text, "html.parser")
 
         count = 0
+        active_job_ids = []
         for row in soup.select("tr.table_row"):
             parsed = parse_web3career_listing(row)
             if not parsed or not should_keep_job(parsed):
                 continue
+            active_job_ids.append(parsed["job_id"])
             if save_job(parsed):
                 count += 1
+        sync_source_jobs("Web3.career", active_job_ids)
         return count
     except Exception as exc:
         print(f"Error scraping Web3.career: {exc}")
@@ -411,6 +421,7 @@ def scrape_web3career():
 
 def scrape_ejobs(max_pages=3):
     count = 0
+    active_job_ids = []
     for page_number in range(1, max_pages + 1):
         url = EJOBS_REMOTE_DESIGN_URL if page_number == 1 else f"{EJOBS_REMOTE_DESIGN_URL}/pagina{page_number}"
         try:
@@ -426,6 +437,7 @@ def scrape_ejobs(max_pages=3):
                 parsed = parse_ejobs_listing(card)
                 if not parsed or not should_keep_job(parsed):
                     continue
+                active_job_ids.append(parsed["job_id"])
                 if save_job(parsed):
                     count += 1
                     page_count += 1
@@ -435,6 +447,7 @@ def scrape_ejobs(max_pages=3):
         except Exception as exc:
             print(f"Error scraping eJobs page {page_number}: {exc}")
             break
+    sync_source_jobs("eJobs.ro", active_job_ids)
     return count
 
 
@@ -445,12 +458,15 @@ def scrape_cryptojobslist():
         root = ET.fromstring(response.text)
 
         count = 0
+        active_job_ids = []
         for item in root.findall("./channel/item"):
             parsed = parse_cryptojobslist_item(item)
             if not parsed or not should_keep_job(parsed):
                 continue
+            active_job_ids.append(parsed["job_id"])
             if save_job(parsed):
                 count += 1
+        sync_source_jobs("CryptoJobsList", active_job_ids)
         return count
     except Exception as exc:
         print(f"Error scraping CryptoJobsList RSS: {exc}")
@@ -464,12 +480,15 @@ def scrape_cryptojobs():
         soup = BeautifulSoup(response.text, "html.parser")
 
         count = 0
+        active_job_ids = []
         for row in soup.find_all("tr"):
             parsed = parse_cryptojobs_row(row)
             if not parsed or not should_keep_job(parsed):
                 continue
+            active_job_ids.append(parsed["job_id"])
             if save_job(parsed):
                 count += 1
+        sync_source_jobs("crypto.jobs", active_job_ids)
         return count
     except Exception as exc:
         print(f"Error scraping crypto.jobs: {exc}")
