@@ -31,6 +31,8 @@ EMPLOYMENT_TYPES = [
     "Temporary",
 ]
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+EJOBS_BASE_URL = "https://www.ejobs.ro"
+EJOBS_REMOTE_DESIGN_URL = f"{EJOBS_BASE_URL}/locuri-de-munca/remote/design"
 
 
 def normalize_text(value):
@@ -194,6 +196,56 @@ def parse_web3career_listing(row):
     }
 
 
+def parse_ejobs_listing(card):
+    title_elem = card.select_one("h2 a[href]")
+    company_elem = card.select_one("h3 a[href]")
+    if not all([title_elem, company_elem]):
+        return None
+
+    title = normalize_text(title_elem.get_text(" ", strip=True))
+    company = normalize_text(company_elem.get_text(" ", strip=True))
+    apply_link = urljoin(EJOBS_BASE_URL, title_elem.get("href", ""))
+
+    lines = [normalize_text(text) for text in card.stripped_strings]
+    lines = [line for line in lines if line]
+    location = ""
+    compensation = ""
+    date_posted = "Unknown"
+
+    for line in lines:
+        if line == title or line == company or line in {"Aplică rapid", "Aplică extern"}:
+            continue
+        if re.search(r"\d{1,2}\s+[A-Za-zĂÂÎȘȚăâîșț]+\.\s+\d{4}", line):
+            date_posted = line
+            continue
+        if "RON" in line or "$" in line or looks_like_compensation(line):
+            compensation = line
+            continue
+        if not location:
+            location = line
+
+    search_blob = " ".join(lines)
+    tags = []
+    if re.search(r"remote|de acasă|work from home", search_blob, re.IGNORECASE):
+        tags.append("Remote")
+    if re.search(r"design", title, re.IGNORECASE):
+        tags.append("Design")
+
+    return {
+        "job_id": stable_job_id("ejobs", apply_link),
+        "title": title,
+        "company": company,
+        "source_site": "eJobs",
+        "date_posted": date_posted,
+        "apply_link": apply_link,
+        "location": location,
+        "employment_type": "",
+        "compensation": compensation,
+        "tags": tags,
+        "search_blob": search_blob,
+    }
+
+
 def should_keep_job(job_data):
     if not is_match(job_data["title"], KEYWORDS):
         return False
@@ -259,8 +311,38 @@ def scrape_web3career():
         return 0
 
 
+def scrape_ejobs(max_pages=3):
+    count = 0
+    for page_number in range(1, max_pages + 1):
+        url = EJOBS_REMOTE_DESIGN_URL if page_number == 1 else f"{EJOBS_REMOTE_DESIGN_URL}/pagina{page_number}"
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=10)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            cards = soup.select("div.job-card")
+            if not cards:
+                break
+
+            page_count = 0
+            for card in cards:
+                parsed = parse_ejobs_listing(card)
+                if not parsed or not should_keep_job(parsed):
+                    continue
+                if save_job(parsed):
+                    count += 1
+                    page_count += 1
+
+            if page_count == 0 and page_number > 1:
+                break
+        except Exception as exc:
+            print(f"Error scraping eJobs page {page_number}: {exc}")
+            break
+    return count
+
+
 def run_all_scrapers():
     print("Starting scrapers run...")
     ccj_count = scrape_cryptocurrencyjobs()
     w3c_count = scrape_web3career()
-    print(f"Finished. Upserted {ccj_count} from CCJ, {w3c_count} from W3C.")
+    ejobs_count = scrape_ejobs()
+    print(f"Finished. Upserted {ccj_count} from CCJ, {w3c_count} from W3C, {ejobs_count} from eJobs.")

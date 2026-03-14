@@ -13,6 +13,7 @@ services:
       - ./shared:/app/shared
     environment:
       - DB_PATH=/app/data/jobs.db
+    restart: unless-stopped
     depends_on:
       - worker
 
@@ -26,3 +27,5 @@ services:
       - ./shared:/app/shared
     environment:
       - DB_PATH=/app/data/jobs.db
+      - SCRAPE_INTERVAL_HOURS=${SCRAPE_INTERVAL_HOURS:-6}
+    restart: unless-stopped

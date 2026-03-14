@@ -2,6 +2,10 @@ import os
 import sqlite3
 
 import pandas as pd
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 JOB_COLUMNS = {
@@ -18,6 +22,11 @@ JOB_COLUMNS = {
     "status": "TEXT DEFAULT 'New'",
     "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     "last_seen_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+}
+
+ALTER_COLUMN_DEFINITIONS = {
+    "created_at": "TIMESTAMP",
+    "last_seen_at": "TIMESTAMP",
 }
 
 
@@ -57,7 +66,8 @@ def init_db():
     }
     for column_name, definition in JOB_COLUMNS.items():
         if column_name not in existing_columns:
-            cursor.execute(f"ALTER TABLE jobs ADD COLUMN {column_name} {definition}")
+            alter_definition = ALTER_COLUMN_DEFINITIONS.get(column_name, definition)
+            cursor.execute(f"ALTER TABLE jobs ADD COLUMN {column_name} {alter_definition}")
 
     cursor.execute(
         "UPDATE jobs SET last_seen_at = COALESCE(last_seen_at, created_at, CURRENT_TIMESTAMP)"
