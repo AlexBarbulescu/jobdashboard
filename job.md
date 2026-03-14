@@ -14,7 +14,7 @@ This project should target a local-first deployment model so it can run on a dev
 
     Storage: Persist job data and status labels in a mounted local volume using SQLite or JSON files.
 
-    Access: The dashboard must be reachable in a browser at http://localhost:8501.
+    Access: The dashboard must be reachable in a browser 
 
     Configuration: All runtime settings must be controlled with environment variables in a local .env file.
 
@@ -65,13 +65,3 @@ The dashboard must only display listings that match ALL these criteria:
     Persistence: Local deployment must preserve saved job states across container restarts.
 
     Health Check: The web container should expose a simple health endpoint or startup check so local deployment issues are easy to diagnose.
-
-6. Local Delivery Requirements
-
-    Required Files: README.md, Dockerfile, docker-compose.yml, requirements.txt, .env.example.
-
-    Local Commands: The documentation must include build, start, stop, and reset commands for Docker-based usage.
-
-    Seed Behavior: On first startup, the app should perform an initial fetch so the dashboard is not empty unless all sources fail.
-
-    Failure Handling: If one source fails, the dashboard should continue running and surface the source failure in logs without crashing the whole app.

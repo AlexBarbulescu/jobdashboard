@@ -1,26 +1,28 @@
+version: '3.8'
+
 services:
   web:
     build:
       context: .
-    env_file:
-      - .env
+      dockerfile: Dockerfile.web
     ports:
       - "8501:8501"
     volumes:
       - ./data:/app/data
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      - ./web:/app/web
+      - ./shared:/app/shared
+    environment:
+      - DB_PATH=/app/data/jobs.db
+    depends_on:
+      - worker
 
   worker:
     build:
       context: .
-    command: ["python", "worker.py"]
-    env_file:
-      - .env
+      dockerfile: Dockerfile.worker
     volumes:
       - ./data:/app/data
-    restart: unless-stopped
+      - ./worker:/app/worker
+      - ./shared:/app/shared
+    environment:
+      - DB_PATH=/app/data/jobs.db

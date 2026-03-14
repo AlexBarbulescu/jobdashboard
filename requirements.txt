@@ -1,6 +1,7 @@
-beautifulsoup4==4.13.4
-feedparser==6.0.11
-python-dotenv==1.1.0
-requests==2.32.3
-streamlit==1.44.1
-streamlit-autorefresh==1.0.1
+streamlit==1.32.2
+beautifulsoup4==4.12.3
+requests==2.31.0
+schedule==1.2.1
+pandas==2.2.1
+lxml==5.1.0
+python-dotenv==1.0.1
