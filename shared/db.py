@@ -72,6 +72,9 @@ def init_db():
     cursor.execute(
         "UPDATE jobs SET last_seen_at = COALESCE(last_seen_at, created_at, CURRENT_TIMESTAMP)"
     )
+    cursor.execute(
+        "DELETE FROM jobs WHERE id = 'mock_1' OR apply_link = 'https://example.com/apply/1'"
+    )
     conn.commit()
     conn.close()
 

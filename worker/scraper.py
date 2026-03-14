@@ -1,5 +1,6 @@
 import hashlib
 import re
+import xml.etree.ElementTree as ET
 from urllib.parse import urljoin
 
 import requests
@@ -33,6 +34,8 @@ EMPLOYMENT_TYPES = [
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 EJOBS_BASE_URL = "https://www.ejobs.ro"
 EJOBS_REMOTE_DESIGN_URL = f"{EJOBS_BASE_URL}/locuri-de-munca/remote/design"
+CRYPTOJOBSLIST_DESIGNER_RSS_URL = "https://api.cryptojobslist.com/rss/Designer.xml"
+CRYPTOJOBS_DESIGN_URL = "https://crypto.jobs/blockchain-design-jobs"
 
 
 def normalize_text(value):
@@ -246,13 +249,108 @@ def parse_ejobs_listing(card):
     }
 
 
+def parse_cryptojobslist_item(item):
+    title = normalize_text(item.findtext("title", default=""))
+    apply_link = normalize_text(item.findtext("link", default=""))
+    company = normalize_text(item.findtext("{http://purl.org/dc/elements/1.1/}creator", default=""))
+    location = normalize_text(item.findtext("{http://search.yahoo.com/mrss/}location", default=""))
+    description_html = item.findtext("description", default="")
+    pub_date = normalize_text(item.findtext("pubDate", default="Unknown"))
+
+    if not title or not apply_link or not company:
+        return None
+
+    description_soup = BeautifulSoup(description_html, "html.parser")
+    description_text = normalize_text(description_soup.get_text(" ", strip=True))
+    tag_texts = []
+    for anchor in description_soup.find_all("a"):
+        text = normalize_text(anchor.get_text(" ", strip=True))
+        if not text:
+            continue
+        if text.endswith(" Jobs"):
+            text = text[:-5]
+        if text not in tag_texts:
+            tag_texts.append(text)
+
+    employment_type = ""
+    for option in EMPLOYMENT_TYPES:
+        if any(option.lower() in tag.lower() for tag in tag_texts):
+            employment_type = option
+            break
+
+    compensation = ""
+    compensation_match = re.search(r"\$[\d,]+(?:\s*-\s*\$[\d,]+)?", description_text)
+    if compensation_match:
+        compensation = compensation_match.group(0)
+
+    search_blob = " ".join([title, company, location, " ".join(tag_texts), description_text[:1500]])
+    return {
+        "job_id": stable_job_id("cjl", apply_link),
+        "title": title,
+        "company": company,
+        "source_site": "CryptoJobsList",
+        "date_posted": pub_date,
+        "apply_link": apply_link,
+        "location": location,
+        "employment_type": employment_type,
+        "compensation": compensation,
+        "tags": tag_texts[:12],
+        "search_blob": search_blob,
+    }
+
+
+def parse_cryptojobs_row(row):
+    job_anchor = row.select_one("a.job-url[itemprop='url']")
+    title_elem = row.select_one("p.job-title[itemprop='title']")
+    company_elem = row.select_one("span[itemprop='name']")
+    age_cell = row.find_all("td")
+    if not all([job_anchor, title_elem, company_elem]) or len(age_cell) < 3:
+        return None
+
+    title = normalize_text(title_elem.get_text(" ", strip=True))
+    company = normalize_text(company_elem.get_text(" ", strip=True))
+    apply_link = normalize_text(job_anchor.get("href", ""))
+    metadata_spans = [normalize_text(span.get_text(" ", strip=True)) for span in job_anchor.select("small span")]
+    metadata_spans = [value for value in metadata_spans if value]
+
+    employment_type = ""
+    location = ""
+    tags = []
+    for value in metadata_spans:
+        cleaned = value.replace("💼", "").replace("⏰", "").replace("🌍", "").strip()
+        if value.startswith("💼"):
+            if cleaned not in tags:
+                tags.append(cleaned)
+        elif value.startswith("⏰"):
+            employment_type = cleaned.replace(" ", "-") if cleaned.lower() == "full time" else cleaned
+            employment_type = employment_type.replace("-", " ")
+        elif value.startswith("🌍"):
+            location = cleaned
+
+    date_posted = normalize_text(age_cell[2].get_text(" ", strip=True)) or "Unknown"
+    search_blob = " ".join([title, company, location, employment_type, " ".join(tags), date_posted])
+    return {
+        "job_id": stable_job_id("cj", apply_link),
+        "title": title,
+        "company": company,
+        "source_site": "crypto.jobs",
+        "date_posted": date_posted,
+        "apply_link": apply_link,
+        "location": location,
+        "employment_type": employment_type,
+        "compensation": "",
+        "tags": tags,
+        "search_blob": search_blob,
+    }
+
+
 def should_keep_job(job_data):
     if not is_match(job_data["title"], KEYWORDS):
         return False
 
     searchable = job_data["search_blob"]
     remote_match = is_match(searchable, LOCATIONS)
-    industry_match = job_data["source_site"] in {"CryptocurrencyJobs", "Web3.career"} or is_match(searchable, INDUSTRIES)
+    industry_match = job_data["source_site"] in {"CryptocurrencyJobs", "Web3.career", "CryptoJobsList", "crypto.jobs"} or is_match(searchable, INDUSTRIES)
     return remote_match and industry_match
 
 
@@ -340,9 +438,49 @@ def scrape_ejobs(max_pages=3):
     return count
 
 
+def scrape_cryptojobslist():
+    try:
+        response = requests.get(CRYPTOJOBSLIST_DESIGNER_RSS_URL, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        root = ET.fromstring(response.text)
+
+        count = 0
+        for item in root.findall("./channel/item"):
+            parsed = parse_cryptojobslist_item(item)
+            if not parsed or not should_keep_job(parsed):
+                continue
+            if save_job(parsed):
+                count += 1
+        return count
+    except Exception as exc:
+        print(f"Error scraping CryptoJobsList RSS: {exc}")
+        return 0
+
+
+def scrape_cryptojobs():
+    try:
+        response = requests.get(CRYPTOJOBS_DESIGN_URL, headers=HEADERS, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        count = 0
+        for row in soup.find_all("tr"):
+            parsed = parse_cryptojobs_row(row)
+            if not parsed or not should_keep_job(parsed):
+                continue
+            if save_job(parsed):
+                count += 1
+        return count
+    except Exception as exc:
+        print(f"Error scraping crypto.jobs: {exc}")
+        return 0
+
+
 def run_all_scrapers():
     print("Starting scrapers run...")
     ccj_count = scrape_cryptocurrencyjobs()
     w3c_count = scrape_web3career()
     ejobs_count = scrape_ejobs()
-    print(f"Finished. Upserted {ccj_count} from CCJ, {w3c_count} from W3C, {ejobs_count} from eJobs.")
+    cjl_count = scrape_cryptojobslist()
+    cj_count = scrape_cryptojobs()
+    print(f"Finished. Upserted {ccj_count} from CCJ, {w3c_count} from W3C, {ejobs_count} from eJobs, {cjl_count} from CryptoJobsList, {cj_count} from crypto.jobs.")
