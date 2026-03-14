@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from html import escape
+import os
 
 import pandas as pd
 import streamlit as st
@@ -17,6 +18,15 @@ AGE_WINDOWS = {
     "Last 30 days": timedelta(days=30),
 }
 SORT_OPTIONS = ["Newest posted", "Recently refreshed", "Compensation first"]
+SCOPE_OPTIONS = ["Crypto-only", "All remote design jobs"]
+SCOPE_DEFAULTS = {
+    "crypto-only": "Crypto-only",
+    "all-remote-design": "All remote design jobs",
+}
+DEFAULT_SCOPE = SCOPE_DEFAULTS.get(
+    os.environ.get("DASHBOARD_SCOPE_DEFAULT", "crypto-only").strip().lower(),
+    "Crypto-only",
+)
 
 
 def parse_tags(value):
@@ -60,6 +70,7 @@ def load_jobs():
     jobs_df["employment_type"] = jobs_df.get("employment_type", "").fillna("")
     jobs_df["compensation"] = jobs_df.get("compensation", "").fillna("")
     jobs_df["tags"] = jobs_df.get("tags", "").fillna("")
+    jobs_df["is_crypto_relevant"] = jobs_df.get("is_crypto_relevant", 1).fillna(1).astype(int).astype(bool)
 
     now = datetime.now()
     jobs_df["posted_at"] = jobs_df["date_posted"].apply(parse_date_posted)
@@ -83,12 +94,16 @@ def apply_filters(
     selected_statuses,
     selected_sources,
     selected_tags,
+    selected_scope,
     max_age_label,
     remote_only,
     compensation_only,
     sort_mode,
 ):
     filtered = jobs_df[jobs_df["status"].isin(selected_statuses)].copy()
+
+    if selected_scope == "Crypto-only":
+        filtered = filtered[filtered["is_crypto_relevant"]]
 
     if selected_sources:
         filtered = filtered[filtered["source_site"].isin(selected_sources)]
@@ -134,13 +149,14 @@ def render_metric_strip(jobs_df):
     latest_seen = jobs_df["last_seen_at"].max()
     latest_label = format_relative_time(latest_seen) if pd.notna(latest_seen) else "Unknown"
     recent_jobs = int((jobs_df["effective_posted_at"] >= (datetime.now() - timedelta(days=7))).sum())
+    crypto_jobs = int(jobs_df["is_crypto_relevant"].sum())
 
     metric_cards = [
         ("Tracked roles", total_jobs),
         ("New in 24h", new_jobs),
         ("Recent 7d", recent_jobs),
+        ("Crypto relevant", crypto_jobs),
         ("Saved", saved_jobs),
-        ("Applied", applied_jobs),
         ("Latest refresh", latest_label),
     ]
     cards_html = "".join(
@@ -522,8 +538,10 @@ else:
     with st.sidebar:
         st.header("Filters")
         search_term = st.text_input("Search roles, companies, places, or tags")
+        scope_index = SCOPE_OPTIONS.index(DEFAULT_SCOPE) if DEFAULT_SCOPE in SCOPE_OPTIONS else 0
+        selected_scope = st.radio("Scope", SCOPE_OPTIONS, index=scope_index)
         selected_statuses = st.multiselect("Status", STATUS_OPTIONS, default=STATUS_OPTIONS)
-        selected_sources = st.multiselect("Source", SOURCE_OPTIONS, default=[source for source in SOURCE_OPTIONS if source in df["source_site"].unique()])
+        selected_sources = st.multiselect("Source", SOURCE_OPTIONS, default=SOURCE_OPTIONS)
         tag_options = sorted({tag for tags in df["tags_list"] for tag in tags})
         selected_tags = st.multiselect("Tags", tag_options)
         max_age_label = st.selectbox("Recency", list(AGE_WINDOWS.keys()), index=2)
@@ -542,6 +560,7 @@ else:
         selected_statuses,
         selected_sources,
         selected_tags,
+        selected_scope,
         max_age_label,
         remote_only,
         compensation_only,

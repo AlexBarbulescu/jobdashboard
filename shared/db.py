@@ -19,6 +19,7 @@ JOB_COLUMNS = {
     "employment_type": "TEXT",
     "compensation": "TEXT",
     "tags": "TEXT",
+    "is_crypto_relevant": "INTEGER DEFAULT 1",
     "status": "TEXT DEFAULT 'New'",
     "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
     "last_seen_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
@@ -54,6 +55,7 @@ def init_db():
             employment_type TEXT,
             compensation TEXT,
             tags TEXT,
+            is_crypto_relevant INTEGER DEFAULT 1,
             status TEXT DEFAULT 'New',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -110,6 +112,7 @@ def insert_job(
     employment_type="",
     compensation="",
     tags="",
+    is_crypto_relevant=True,
 ):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -128,11 +131,12 @@ def insert_job(
                 employment_type,
                 compensation,
                 tags,
+                is_crypto_relevant,
                 status,
                 created_at,
                 last_seen_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'New', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(apply_link) DO UPDATE SET
                 title = excluded.title,
                 company = excluded.company,
@@ -142,6 +146,7 @@ def insert_job(
                 employment_type = excluded.employment_type,
                 compensation = excluded.compensation,
                 tags = excluded.tags,
+                is_crypto_relevant = excluded.is_crypto_relevant,
                 last_seen_at = CURRENT_TIMESTAMP
             ''',
             (
@@ -155,6 +160,7 @@ def insert_job(
                 employment_type,
                 compensation,
                 serialized_tags,
+                int(bool(is_crypto_relevant)),
             ),
         )
         conn.commit()

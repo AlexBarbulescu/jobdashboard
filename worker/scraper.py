@@ -13,6 +13,7 @@ from shared.job_dates import is_recent_post
 KEYWORDS = [
     "UI/UX",
     "Product Design",
+    "Design Engineer",
     "Advertising Designer",
     "Graphic Designer",
     "Visual Designer",
@@ -136,6 +137,7 @@ def parse_cryptocurrencyjobs_listing(job):
         "employment_type": employment_type,
         "compensation": compensation,
         "tags": tags,
+        "is_crypto_relevant": True,
         "search_blob": " ".join([title, company, location, compensation, " ".join(tags)]),
     }
 
@@ -198,6 +200,7 @@ def parse_web3career_listing(row):
         "employment_type": employment_type,
         "compensation": compensation,
         "tags": tags,
+        "is_crypto_relevant": True,
         "search_blob": " ".join([title, company, location, compensation, tags_text]),
     }
 
@@ -248,6 +251,7 @@ def parse_ejobs_listing(card):
         "employment_type": "",
         "compensation": compensation,
         "tags": tags,
+        "is_crypto_relevant": is_match(search_blob, INDUSTRIES),
         "search_blob": search_blob,
     }
 
@@ -298,6 +302,7 @@ def parse_cryptojobslist_item(item):
         "employment_type": employment_type,
         "compensation": compensation,
         "tags": tag_texts[:12],
+        "is_crypto_relevant": True,
         "search_blob": search_blob,
     }
 
@@ -343,6 +348,7 @@ def parse_cryptojobs_row(row):
         "employment_type": employment_type,
         "compensation": "",
         "tags": tags,
+        "is_crypto_relevant": True,
         "search_blob": search_blob,
     }
 
@@ -353,9 +359,8 @@ def should_keep_job(job_data):
 
     searchable = job_data["search_blob"]
     remote_match = is_match(searchable, LOCATIONS)
-    industry_match = job_data["source_site"] in {"CryptocurrencyJobs", "Web3.career", "CryptoJobsList", "crypto.jobs"} or is_match(searchable, INDUSTRIES)
     recent_match = is_recent_post(job_data.get("date_posted"), MAX_JOB_AGE_DAYS)
-    return remote_match and industry_match and recent_match
+    return remote_match and recent_match
 
 
 def save_job(job_data):
@@ -370,6 +375,7 @@ def save_job(job_data):
         employment_type=job_data["employment_type"],
         compensation=job_data["compensation"],
         tags=job_data["tags"],
+        is_crypto_relevant=job_data.get("is_crypto_relevant", False),
     )
 
 

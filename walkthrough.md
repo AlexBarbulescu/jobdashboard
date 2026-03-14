@@ -43,9 +43,11 @@ Example `.env`:
 
 ```env
 SCRAPE_INTERVAL_HOURS=6
+DASHBOARD_SCOPE_DEFAULT=all-remote-design
 ```
 
 For Docker, `DB_PATH` is set inside `docker-compose.yml` and does not need to be changed.
+Docker now runs the code baked into the image and only mounts `data/` for persistence, which avoids Windows bind-mount issues with the Python source tree.
 
 ### 3. Start the stack
 
@@ -54,6 +56,8 @@ From the repo root:
 ```powershell
 docker compose up --build
 ```
+
+If you change Python code or dependencies later, rebuild with the same command so the containers pick up the updated image.
 
 ### 4. Open the dashboard
 
@@ -88,9 +92,12 @@ Recommended native `.env`:
 ```env
 DB_PATH=data/jobs.db
 SCRAPE_INTERVAL_HOURS=6
+MAX_JOB_AGE_DAYS=30
+DASHBOARD_SCOPE_DEFAULT=all-remote-design
 ```
 
 The app now loads `.env` automatically.
+The dashboard scope can be switched in the sidebar between crypto-only and all remote design jobs.
 
 ### 3. Start the worker and dashboard
 
@@ -130,6 +137,8 @@ Once the web app is running, verify the health endpoint:
 http://localhost:8501/_stcore/health
 ```
 
+The `web` service also has a Docker healthcheck, so `docker compose ps` will show whether the container is healthy.
+
 ## Logs
 
 Native run logs are written to:
@@ -162,3 +171,9 @@ Stop the existing process using port 8501 or update the Streamlit port in the st
 1. Wait for the first scrape to complete.
 2. Check that `data/jobs.db` exists.
 3. Review worker logs for scraping errors.
+
+### Docker build is slow or fails on Windows
+
+1. Make sure you are building from the repo root.
+2. Re-run `docker compose up --build` after pulling the latest changes.
+3. This repo now excludes `.venv`, logs, and the local SQLite file from the Docker build context through `.dockerignore`, which is required for a reliable Windows build.
